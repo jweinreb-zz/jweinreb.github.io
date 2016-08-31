@@ -1,6 +1,7 @@
 ---
 layout: post
-title:  "Forecasting Economic Recessions with LASSO \ (Python Version)"
+title:  | "Forecasting Economic Recessions with LASSO 
+| (Python Version)"
 date:   2016-08-25
 ---
 This post gives some Python code to implement LASSO-based forecasts of economic recessions. It relies upon [recession_data.csv]({{ site.url }}/assets/recession_data.csv). 
