@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Forecasting Economic Recessions with LASSO (Python Version)"
+title:  "Forecasting Economic Recessions with LASSO \ (Python Version)"
 date:   2016-08-25
 ---
 This post gives some Python code to implement LASSO-based forecasts of economic recessions. It relies upon [recession_data.csv]({{ site.url }}/assets/recession_data.csv). 
@@ -177,7 +177,10 @@ print(mse)
 
 {% endhighlight %}
 
+{% marginfigure "fig3" 'assets/img/recession-py.png' "Predicted Probability of Recession in the US" %}
+
 Finally, we can plot the in-sample and out-of-sample recession forecasts with matplotlib.
+
 {% highlight python %}
 plt.figure()
 plt.plot(X.index, mod.predict_proba(X)[:, 1], label= 'In-sample prediction (to Mar 2005)', linewidth = 2)
@@ -198,5 +201,5 @@ plt.show()
 
 {% endhighlight %}
 
-{% fullwidth 'assets/img/recession-py.png' %}
+
 

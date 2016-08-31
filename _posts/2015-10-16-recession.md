@@ -200,6 +200,8 @@ pred.out <- zoo(pred.out[,1], as.Date(rownames(pred.out), "%Y-%m-%d") )
 
 Plot the in-sample predicted probability of recession in blue, and the out-of-sample predictions in red.
 
+ {% marginfigure "fig1"  'assets/img/predict200.png' 'Predicted Probability of Recession in the US' %} 
+
 {% highlight r %}
 x <- pred.in
 plot(x, xlab = "", ylab = "", col = "blue", lwd = 3, type = "n",
@@ -220,8 +222,6 @@ plot(x, xlab = "", ylab = "", col = "blue", lwd = 3, type = "n",
 
 {% endhighlight %}
 
-{% fullwidth 'assets/img/predict200.png' %}
-
 The out-of-sample predictions look excellent, but We can also zoom into them even further. First, restrict the data to out-of-sample predictions, and classify them as (in)correct recession forecasts based on a threshold value of 0.5
 
 {% highlight r %}
@@ -232,6 +232,9 @@ df[df$pred.out < 0.5 & df$usr == 1 | df$pred.out > 0.5 & df$usr == 0, ]
 {% endhighlight %}
 
 Then, plot correct predictions in green and incorrect predictions in red. Note that our model has around a one-quarter lag at forecasting recessions in real-time.
+
+{% marginfigure "fig2" "assets/img/error200.png" "A close-up: where did the LASSO get it wrong?" %}
+
 
 {% highlight r %}
 dtMin <- as.Date("2007-10-01", format = "%Y-%m-%d")
@@ -249,4 +252,3 @@ points(df$pre[-idx], col = "darkgreen", lwd = 3, pch = 19)
 points(df$pred[idx], col = "red", pch = 19)
 {% endhighlight %}
 
-{% fullwidth "assets/img/error200.png" %}
