@@ -1,6 +1,7 @@
 ---
 layout: post
-title:  | "Forecasting Economic Recessions with LASSO 
+title:  | 
+| "Forecasting Economic Recessions with LASSO 
 | (Python Version)"
 date:   2016-08-25
 ---
