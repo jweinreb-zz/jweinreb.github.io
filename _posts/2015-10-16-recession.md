@@ -6,122 +6,25 @@ date:   2015-10-16
 
 I developed a machine learning model that predicts recessions out-of-sample with over 95% accuracy. You can find the white paper [here]({{ site.url }}/assets/Recession Prediction.pdf)
 
-The model uses LASSO estimation and relies on [recession_data.csv]({{ site.url }}/assets/recession_data.csv)
+The model uses LASSO estimation and relies on a panel of [transformed economic data]({{ site.url }}/assets/recTransformed.csv). Inputs here are proprietary blends of standard leading economic indicators based on my work at Variant Perception. Variables in the data set fall into nine categories: (1) consumer confidence; (2) corporate credit; (3) national economic indices from the Fed and others; (4) the housing sector; (5) the manufacturing sector; (6) macro inputs like inflation and the money supply; (7) the US equity market; (8) (un)employment; and (9) the shape of the US yield curve. The outcome variable is a binary recession indicator, coded ex-post by recession dating committee within the NBER. 
 
-You'll also need the following libraries:
+First, load the required libraries and data
 {% highlight r %}
+
 library(quantmod)
- library(TTR)
- library(zoo)
- library(lubridate)
- library(glmnet)
+library(TTR)
+library(zoo)
+library(lubridate)
+library(glmnet)
+
+p <- read.csv("recTransformed.csv", header=T)
+p$X <- as.Date(p$X, format = "%m/%d/%y")
+p <- zoo(p[,-1], order.by = p$X)
+names(p) <- tolower(gsub(".Index", "", names(p)))
+
 {% endhighlight %}
 
 <!--more-->
-
-Load the data and transform the base variables in a variety of ways. We can wrap this in a `GetInputs()` function:
-{% highlight r %}
-GetInputs <- function(){
-
-	# Load raw data and convert to zoo
-	p <- read.csv("recession_data.csv", header=T)
-	p$X <- as.Date(p$X, format = "%m/%d/%y")
-	p <- zoo(p[,-1], order.by = p$X)
-	names(p) <- tolower(gsub(".Index", "", names(p)))
-
-	# Carry forward quarterly observations
-	p$phffanx0 <- c(rep(NA, 2), na.locf(p$phffanx0))
-	p$gdp.cyoy <- c(rep(NA, 2), na.locf(p$gdp.cyoy))
-	p <- p[year(index(p)) >= 1978 & year(index(p)) < 2016,]
-
-	################################
-	
-	# Consumer Expectations:
-	p$conssent.1 <- SMA(p$conssent, 3)/Lag(SMA(p$conssent, 3), 6) - 1 # 6m change in 3mma
-	p$conssent.2 <- runMin(p$conssent/runMax(p$conssent, 12),9) # 9m min of current / annual max
-	p$conssent.3 <- runSum(0.5* sign( diff(SMA(p$lei.cexp, 2)) ) + 0.5, 8)
-
-	# Corporate Credit
-	p$cred.1 <- SMA(p$moodcavg, 2)/Lag(SMA(p$moodcavg, 2), 6) - 1
-	p$cred.2 <- SMA(p$moodcbaa - p$usgg10yr, 4)
-	p$cred.3 <- (p$moodcbaa - p$moodcaaa)/(Lag(p$moodcbaa,6) - Lag(p$moodcaaa, 6)) - 1    
-	p$cred.4 <- runSum(0.5* sign( diff(SMA(p$moodcavg, 2)) ) + 0.5, 8)
-
-	# Broad Indices
-	p$indices.1 <- p$ads.bci
-	p$indices.2 <- p$cfnai
-	p$indices.3 <- p$coi.totl / Lag(p$coi.totl, 6) - 1
-	p$indices.4 <- p$lei.lci
-	p$indices.5 <- SMA(p$oustdiff, 3)
-	p$indices.6 <- p$phffanx0
-	p$indices.7 <- p$s5finl / runMax(p$s5finl, 14)
-	p$indices.8 <- runSum(0.5* sign( diff(SMA(p$lei.yoy, 2)) ) + 0.5, 8)
-
-	# Housing
-	p$housing.1 <- SMA(p$lei.bp, 3) / Lag(SMA(p$lei.bp, 3), 12) - 1
-	p$housing.2 <- p$nhslnfs / Lag(p$nhslnfs, 12) - 1
-	p$housing.3 <- SMA(p$nhsltot, 3)
-	p$housing.4 <- SMA(p$nmcmfus - p$usgg10yr, 4)
-
-	# Manufacturing
-	p$manu.1 <- p$napmnewo / p$napminv
-	p$manu.2 <- SMA(p$napmpmi, 2)
-	p$manu.3 <- p$crb.rind / runMax(p$crb.rind, 12)
-	p$manu.4 <- SMA( p$ecrsuscp / Lag(p$ecrsuscp, 6) - 1, 4)
-	p$manu.5 <- SMA( p$ipvptrmh / Lag(p$ipvptrmh, 12) - 1, 3)
-	p$manu.6 <- runSum(0.5* sign( diff(SMA(p$lei.nwcn, 2)) ) + 0.5, 8)
-
-	# Macro
-	p$macro.1 <- p$uscrwtic / Lag(p$uscrwtic, 12) - 1
-	p$macro.2 <- SMA(p$dxy, 4)
-	p$macro.3 <- p$gdp.cyoy
-	p$macro.4 <- p$m1..yoy - p$cpi.yoy
-	#p$macro.5 <- runSum(0.5* sign( diff(SMA(p$lei.m2, 2)) ) + 0.5, 8)  
-
-	# Equities
-	p$equities.1 <- p$spx/Lag(p$spx, 6) - 1
-	p$equities.2 <- runSum(0.5* sign( diff(SMA(p$lei.stkp, 2)) ) + 0.5, 8)  # before: 6-month average of 1-month changes
-	p$equities.3 <- SMA( (p$spx/Lag(p$spx,6) - 1) / (p$usgg10yr/Lag(p$usgg10yr,6) - 1)     ,4)
-	p$equities.4 <- p$tran / runMax(p$tran, 12)
-
-	# Employment
-	p$emp.1 <- SMA(p$injcjc4, 2) / Lag(SMA(p$injcjc4, 2),6) - 1
-	p$emp.2 <- p$injcjc4 / Lag(p$injcjc4, 12) - 1
-	p$emp.3 <- p$injcjc4 / runMin(p$injcjc4, 12)
-	p$emp.4 <- runSum(0.5* sign( diff(SMA(p$lei.avgw, 2)) ) + 0.5, 8) # before: 6-month average of 1-month changes
-	p$emp.5 <- SMA(p$lei.wkij, 2)
-	p$emp.6 <- SMA(p$nfp.t, 3) / Lag( SMA(p$nfp.t, 3), 12) - 1
-	p$emp.7 <- 50 - p$oust.neg
-	p$emp.8 <- p$usestemp / Lag(p$usestemp, 12) - 1
-
-	# Yield Curve
-	p$yc.1 <- (p$dljhytw - p$usgg10yr) / runMax(p$dljhytw - p$usgg10yr, 12)
-	p$yc.2 <- runSum(0.5* sign( diff(SMA(p$lei.irte, 2)) ) + 0.5, 8)
-	p$yc.3 <- p$usgg10yr / runMax(p$usgg10yr, 12)
-	p$yc.4 <- (p$usgg10yr - p$usgg5yr) / Lag(p$usgg10yr - p$usgg5yr, 6) - 1
-	p$yc.5 <- SMA(p$usgg10yr - p$usgg5yr, 2)
-	p$yc.6 <- (p$usgg10yr - p$usgg3m) / Lag(p$usgg10yr - p$usgg3m, 6) - 1
-	p$yc.7 <- SMA(p$usgg10yr - p$usgg3m, 2)
-
-	################################
-	
-	# Clean model inputs - discard missing vars.
-	vars <- names(p)[c(1, 46:ncol(p))]
-	p <- as.data.frame(p[, vars])
-	omit <- c()
-	for(i in 1:ncol(p)){
-		if( length(which(is.na(p[,i]))) > 50){
-			omit <- c(omit, i)
-		}
-	}
-	names(p)[omit]
-	p <- p[, -omit]
-	p <- p[complete.cases(p),]
-
-	return(p)
-
-}
-{% endhighlight %}
 
 Next, estimate the LASSO from the input data with `CalcLasso()`
 
