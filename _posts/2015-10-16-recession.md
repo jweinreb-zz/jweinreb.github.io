@@ -156,20 +156,6 @@ points(df$pred[idx], col = "red", pch = 19)
 
 We can compare the LASSO logit model to a naive logit model and the recession probabilities produced by economist Jeremy Piger,. 
 
-\begin{table}[H]
-\footnotesize
-\begin{tabular}{| l | ll | | l |}
-\hline
-Model & False Alarms & Failure to Warn & Total Misclassification Rate \\
-\hline
-Piger                                        & 0 & 21 (4.91\%) & 4.91\%  \\
-Naive Logit         & 2 (0.47\%) & 5 (1.17\%) & 1.64\% \\ 
-Lasso                                      & 0 & 3 (0.07\%) &  0.07\%\\
-\hline
-\end{tabular}
-\caption{Confusion Matrix}
-\end{table}
 
-
-{% marginfigure "fig3" "assets/img/recession_comparison3.png" "Comparing recession probabilities across models" %}
+{% maincolumn "fig3" "assets/img/recession_comparison3.png" "Comparing recession probabilities across models" %}
 
