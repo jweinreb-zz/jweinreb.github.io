@@ -157,5 +157,5 @@ points(df$pred[idx], col = "red", pch = 19)
 We can compare the LASSO logit model to a naive logit model and the recession probabilities produced by economist Jeremy Piger,. 
 
 
-{% fullwidth "assets/img/recession_comparison3.png" "Comparing recession probabilities across models" %}
+{% maincolumn "assets/img/recession_comparison3.png" "Comparing recession probabilities across models" %}
 
