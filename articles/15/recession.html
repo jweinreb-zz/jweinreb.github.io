@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Forecasting Economic Recessions with LASSO (R Version)</title>
+  <meta name="description" content="I developed a machine learning model that predicts recessions out-of-sample with over 95% accuracy.The model uses LASSO estimation and relies on a panel of t...">
+
+  <!-- Google Fonts loaded here depending on setting in _data/options.yml true loads font, blank does not-->
+  
+    <link href='//fonts.googleapis.com/css?family=Lato:400,400italic' rel='stylesheet' type='text/css'>
+  
+  
+  <!-- Load up MathJax script if needed ... specify in /_data/options.yml file-->
+  
+    <script type="text/javascript" src="//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+  
+
+  <link rel="stylesheet" type="text/css" href="/css/tufte.css">
+  <!-- <link rel="stylesheet" type="text/css" href="/css/print.css" media="print"> -->
+
+  <link rel="canonical" href="/articles/15/recession">
+
+  <link rel="alternate" type="application/rss+xml" title="jweinreb.github.io" href="/feed.xml" />
+</head>
+
+  <body>
+    <!--- Header and nav template site-wide -->
+<header>
+    <nav class="group">
+	<a href="/"><img class="badge" src="/assets/img/SU_New_BlockStree_2color.png" alt="CH"></a>
+	
+		
+  	
+		
+		    
+		      <a href="/">blog</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/vitae/">Vitae</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/about/">About</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/css/print.css"></a>
+		    
+	    
+  	
+		
+  	
+	</nav>
+</header>
+
+    <article class="group">
+      <h1>Forecasting Economic Recessions with LASSO (R Version)</h1>
+<p class="subtitle">October 16, 2015</p>
+
+<p>I developed a machine learning model that predicts recessions out-of-sample with over 95% accuracy.</p>
+
+<p>The model uses LASSO estimation and relies on a panel of <a href="/assets/recTransformed.csv">transformed economic data</a>. Inputs here are proprietary blends of standard leading economic indicators based on some of my prior consulting work. Variables in the data set fall into nine categories capturing things like the housing market, credit spreads, the yield curve, etc. The outcome variable is a binary recession indicator, coded ex-post by a recession dating committee within the NBER.</p>
+
+<p>First, load the required libraries and data</p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">library</span><span class="p">(</span><span class="n">quantmod</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">TTR</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">zoo</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">lubridate</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">glmnet</span><span class="p">)</span><span class="w">
+
+</span><span class="n">p</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">read.csv</span><span class="p">(</span><span class="s2">"recTransformed.csv"</span><span class="p">,</span><span class="w"> </span><span class="n">header</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w">
+</span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="p">,</span><span class="w"> </span><span class="n">format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%m/%d/%y"</span><span class="p">)</span><span class="w">
+</span><span class="n">p</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">p</span><span class="p">[,</span><span class="m">-1</span><span class="p">],</span><span class="w"> </span><span class="n">order.by</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="p">)</span><span class="w">
+</span><span class="nf">names</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">tolower</span><span class="p">(</span><span class="n">gsub</span><span class="p">(</span><span class="s2">".Index"</span><span class="p">,</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="nf">names</span><span class="p">(</span><span class="n">p</span><span class="p">)))</span></code></pre></figure>
+
+<!--more-->
+
+<p>Next, estimate the LASSO from the input data with <code class="highlighter-rouge">CalcLasso()</code></p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">CalcLasso</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="k">function</span><span class="p">(</span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="n">plot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">F</span><span class="p">,</span><span class="w"> </span><span class="n">return.cvobj</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">T</span><span class="p">){</span><span class="w">
+
+	</span><span class="c1">########
+</span><span class="w">	</span><span class="c1"># Arguments:
+</span><span class="w">	</span><span class="c1">#   p = input data generated from GetInputs()
+</span><span class="w">	</span><span class="c1">#   plot = if T, output plot of lambda vs misclassification error
+</span><span class="w">	</span><span class="c1">#  return.cvobj = if T return base cv.glmnet object; o.w. return res
+</span><span class="w">	</span><span class="c1"># Returns: one of:
+</span><span class="w">	</span><span class="c1">#   cvobj = cv.glmnet object
+</span><span class="w">	</span><span class="c1">#   res = list() containing model lambda, coefficients, and fitted values
+</span><span class="w">	</span><span class="c1">########
+</span><span class="w">
+	</span><span class="n">res</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="kc">NULL</span><span class="w">
+	</span><span class="n">x</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">model.matrix</span><span class="p">(</span><span class="n">usrindex</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">.</span><span class="w"> </span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="p">)[,</span><span class="m">-1</span><span class="p">]</span><span class="w">
+	</span><span class="n">y</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">p</span><span class="o">$</span><span class="n">usrindex</span><span class="w">
+	</span><span class="n">cv.glmod</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">cv.glmnet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">alpha</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">family</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"binomial"</span><span class="p">,</span><span class="w"> </span><span class="n">type.measure</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"class"</span><span class="p">)</span><span class="w">
+	</span><span class="n">fit.glmod</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">glmnet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">alpha</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">family</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"binomial"</span><span class="p">)</span><span class="w">
+
+	</span><span class="k">if</span><span class="p">(</span><span class="n">plot</span><span class="p">){</span><span class="w">
+		</span><span class="n">pdf</span><span class="p">(</span><span class="s2">"gvmod.pdf"</span><span class="p">)</span><span class="w">
+		</span><span class="n">plot</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">)</span><span class="w">
+		</span><span class="n">dev.off</span><span class="p">()</span><span class="w">
+	</span><span class="p">}</span><span class="w">
+
+	</span><span class="n">res</span><span class="o">$</span><span class="n">lambda</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">cv.glmod</span><span class="o">$</span><span class="n">lambda.min</span><span class="w">
+	</span><span class="n">res</span><span class="o">$</span><span class="n">coefs</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">coef</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lambda.min"</span><span class="p">)</span><span class="w">
+
+	</span><span class="c1"># Get Lasso predictions
+</span><span class="w">	</span><span class="n">pred</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.data.frame</span><span class="p">(</span><span class="w"> </span><span class="n">predict</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">,</span><span class="w"> </span><span class="n">newx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lambda.min"</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"response"</span><span class="p">)</span><span class="w"> </span><span class="p">)</span><span class="w">
+	</span><span class="nf">names</span><span class="p">(</span><span class="n">pred</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="nf">c</span><span class="p">(</span><span class="s2">"fitted.value"</span><span class="p">)</span><span class="w">
+	</span><span class="n">pred</span><span class="o">$</span><span class="n">dts</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="n">rownames</span><span class="p">(</span><span class="n">pred</span><span class="p">),</span><span class="w"> </span><span class="n">format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%Y-%m-%d"</span><span class="p">)</span><span class="w">
+	</span><span class="n">pred</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">pred</span><span class="o">$</span><span class="n">fitted.value</span><span class="p">,</span><span class="w"> </span><span class="n">pred</span><span class="o">$</span><span class="n">dts</span><span class="p">)</span><span class="w">
+	</span><span class="n">index</span><span class="p">(</span><span class="n">pred</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">index</span><span class="p">(</span><span class="n">pred</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">months</span><span class="p">(</span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="m">1</span><span class="w">
+	</span><span class="n">res</span><span class="o">$</span><span class="n">pred</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">pred</span><span class="w">
+
+	</span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="w"> </span><span class="n">return.cvobj</span><span class="p">){</span><span class="w">
+		</span><span class="nf">return</span><span class="p">(</span><span class="n">res</span><span class="p">)</span><span class="w">
+	</span><span class="p">}</span><span class="w">
+
+	</span><span class="k">if</span><span class="p">(</span><span class="n">return.cvobj</span><span class="p">){</span><span class="w">
+		</span><span class="nf">return</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">)</span><span class="w">
+	</span><span class="p">}</span><span class="w">
+
+</span><span class="p">}</span></code></pre></figure>
+
+<p>Then we can train the LASSO on data from 1980 to 2005, and fit it out of sample to data from 2005 on:</p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="c1"># Training set from 1980 to 2005
+</span><span class="n">p.train</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="m">1</span><span class="o">:</span><span class="m">300</span><span class="p">,</span><span class="w"> </span><span class="p">]</span><span class="w">
+
+</span><span class="c1"># Test set from 2005 to Dec 2015
+</span><span class="n">p.test</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">p</span><span class="p">[</span><span class="m">301</span><span class="o">:</span><span class="n">nrow</span><span class="p">(</span><span class="n">p</span><span class="p">),</span><span class="w"> </span><span class="p">]</span><span class="w">
+
+</span><span class="c1"># Train the model; generate in-sample predictions
+</span><span class="n">cv.glmod</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">CalcLasso</span><span class="p">(</span><span class="n">p.train</span><span class="p">,</span><span class="w"> </span><span class="n">plot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">F</span><span class="p">,</span><span class="w"> </span><span class="n">return.cvobj</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">T</span><span class="p">)</span><span class="w">
+</span><span class="n">x.in</span><span class="o">&lt;-</span><span class="w"> </span><span class="n">model.matrix</span><span class="p">(</span><span class="n">usrindex</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">.</span><span class="w"> </span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p.train</span><span class="p">)[,</span><span class="m">-1</span><span class="p">]</span><span class="w">
+</span><span class="n">pred.in</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">predict</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">,</span><span class="w"> </span><span class="n">newx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x.in</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lambda.min"</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"response"</span><span class="p">)</span><span class="w">
+</span><span class="n">pred.in</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">pred.in</span><span class="p">[,</span><span class="m">1</span><span class="p">],</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="n">rownames</span><span class="p">(</span><span class="n">pred.in</span><span class="p">),</span><span class="w"> </span><span class="s2">"%Y-%m-%d"</span><span class="p">)</span><span class="w"> </span><span class="p">)</span><span class="w">
+
+</span><span class="c1"># Fit the model on the test set; generate out-of-sample predictions
+</span><span class="n">x.out</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">model.matrix</span><span class="p">(</span><span class="n">usrindex</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">.</span><span class="w"> </span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p.test</span><span class="p">)[,</span><span class="m">-1</span><span class="p">]</span><span class="w">
+</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">predict</span><span class="p">(</span><span class="n">cv.glmod</span><span class="p">,</span><span class="w"> </span><span class="n">newx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x.out</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lambda.min"</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"response"</span><span class="p">)</span><span class="w">
+</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">pred.out</span><span class="p">[,</span><span class="m">1</span><span class="p">],</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="n">rownames</span><span class="p">(</span><span class="n">pred.out</span><span class="p">),</span><span class="w"> </span><span class="s2">"%Y-%m-%d"</span><span class="p">)</span><span class="w"> </span><span class="p">)</span></code></pre></figure>
+
+<p>Plot the in-sample predicted probability of recession in blue, and the out-of-sample predictions in red.</p>
+
+<p><label for="fig1" class="margin-toggle">⊕</label><input type="checkbox" id="fig1" class="margin-toggle" /><span class="marginnote"><img class="fullwidth" src="/assets/img/predict200.png" /><br />Predicted Probability of Recession in the US</span></p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">x</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">pred.in</span><span class="w">
+</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">xlab</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="n">ylab</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"blue"</span><span class="p">,</span><span class="w"> </span><span class="n">lwd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">3</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"n"</span><span class="p">,</span><span class="w">
+    </span><span class="n">main</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="n">xlim</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">c</span><span class="p">(</span><span class="nf">min</span><span class="p">(</span><span class="n">index</span><span class="p">(</span><span class="n">pred.in</span><span class="p">)),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">index</span><span class="p">(</span><span class="n">pred.out</span><span class="p">))))</span><span class="w">
+  </span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1980-01-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1980-07-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+  </span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1981-07-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1982-11-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+  </span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1990-07-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"1991-03-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+  </span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2001-03-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2001-11-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+  </span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2007-12-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2009-06-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+
+  </span><span class="n">lines</span><span class="p">(</span><span class="n">pred.in</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"blue"</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="s2">"l"</span><span class="p">,</span><span class="w"> </span><span class="n">lwd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">3</span><span class="p">)</span><span class="w">
+  </span><span class="n">lines</span><span class="p">(</span><span class="n">pred.out</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"red"</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="s2">"l"</span><span class="p">,</span><span class="w"> </span><span class="n">lwd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">3</span><span class="p">)</span></code></pre></figure>
+
+<p>The out-of-sample predictions look excellent, but We can also zoom into them even further. First, restrict the data to out-of-sample predictions, and classify them as (in)correct recession forecasts based on a threshold value of 0.5</p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">usr</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">p</span><span class="o">$</span><span class="n">usrindex</span><span class="p">)</span><span class="w">
+</span><span class="n">df</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">merge</span><span class="p">(</span><span class="n">pred.out</span><span class="p">,</span><span class="w"> </span><span class="n">usr</span><span class="p">)</span><span class="w">
+</span><span class="n">df</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">df</span><span class="p">[</span><span class="n">complete.cases</span><span class="p">(</span><span class="n">df</span><span class="p">),</span><span class="w"> </span><span class="p">]</span><span class="w">
+</span><span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="m">0.5</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">df</span><span class="o">$</span><span class="n">usr</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0.5</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">df</span><span class="o">$</span><span class="n">usr</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">0</span><span class="p">,</span><span class="w"> </span><span class="p">]</span></code></pre></figure>
+
+<p>Then, plot correct predictions in green and incorrect predictions in red. Note that our model has around a one-quarter lag at forecasting recessions in real-time.</p>
+
+<p><label for="fig2" class="margin-toggle">⊕</label><input type="checkbox" id="fig2" class="margin-toggle" /><span class="marginnote"><img class="fullwidth" src="/assets/img/error200.png" /><br />A close-up: where did the LASSO get it wrong?</span></p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">dtMin</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2007-10-01"</span><span class="p">,</span><span class="w"> </span><span class="n">format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%Y-%m-%d"</span><span class="p">)</span><span class="w">
+</span><span class="n">dtMax</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2009-12-01"</span><span class="p">,</span><span class="w"> </span><span class="n">format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%Y-%m-%d"</span><span class="p">)</span><span class="w">
+</span><span class="n">seq</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">seq</span><span class="p">(</span><span class="n">dtMin</span><span class="p">,</span><span class="w"> </span><span class="n">dtMax</span><span class="p">,</span><span class="w"> </span><span class="s2">"month"</span><span class="p">)[</span><span class="n">seq</span><span class="p">(</span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="m">27</span><span class="p">,</span><span class="w"> </span><span class="m">3</span><span class="p">)]</span><span class="w">
+</span><span class="n">lab</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="nf">c</span><span class="p">(</span><span class="s2">"2007Q4"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2008Q1"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2008Q2"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2008Q3"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2008Q4"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2009Q1"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2009Q2"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2009Q3"</span><span class="p">,</span><span class="w"> </span><span class="s2">"2009Q4"</span><span class="p">)</span><span class="w">
+</span><span class="n">plot</span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="p">,</span><span class="w"> </span><span class="n">xlab</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="n">ylab</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"blue"</span><span class="p">,</span><span class="w"> </span><span class="n">lwd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">3</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"n"</span><span class="p">,</span><span class="w">
+      </span><span class="n">xlim</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">c</span><span class="p">(</span><span class="n">dtMin</span><span class="p">,</span><span class="w"> </span><span class="n">dtMax</span><span class="p">),</span><span class="w"> </span><span class="n">xaxt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"n"</span><span class="p">)</span><span class="w">
+      </span><span class="n">axis</span><span class="p">(</span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">seq</span><span class="p">,</span><span class="w"> </span><span class="n">lab</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lab</span><span class="w"> </span><span class="p">)</span><span class="w">
+</span><span class="n">rect</span><span class="p">(</span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2007-12-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">min</span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="m">-0.1</span><span class="p">,</span><span class="w">
+    </span><span class="n">as.Date</span><span class="p">(</span><span class="s2">"2009-06-01"</span><span class="p">),</span><span class="w"> </span><span class="nf">max</span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="p">,</span><span class="w"> </span><span class="n">na.rm</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">0.1</span><span class="p">,</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lightgrey"</span><span class="p">)</span><span class="w">
+</span><span class="n">abline</span><span class="p">(</span><span class="n">h</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="m">0.5</span><span class="p">,</span><span class="w"> </span><span class="n">lty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">2</span><span class="p">)</span><span class="w">
+</span><span class="n">idx</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">which</span><span class="p">(</span><span class="w"> </span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="m">0.5</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">df</span><span class="o">$</span><span class="n">usr</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred.out</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0.5</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">df</span><span class="o">$</span><span class="n">usr</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">0</span><span class="p">)</span><span class="w"> </span><span class="p">)</span><span class="w">
+</span><span class="n">points</span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pre</span><span class="p">[</span><span class="o">-</span><span class="n">idx</span><span class="p">],</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"darkgreen"</span><span class="p">,</span><span class="w"> </span><span class="n">lwd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">3</span><span class="p">,</span><span class="w"> </span><span class="n">pch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">19</span><span class="p">)</span><span class="w">
+</span><span class="n">points</span><span class="p">(</span><span class="n">df</span><span class="o">$</span><span class="n">pred</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"red"</span><span class="p">,</span><span class="w"> </span><span class="n">pch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">19</span><span class="p">)</span></code></pre></figure>
+
+<p>We can compare the LASSO logit model to a naive logit model and the recession probabilities produced by economist Jeremy Piger,.</p>
+
+<figure><figcaption>Comparing recession probabilities across models</figcaption><img src="/assets/img/recession_comparison3.png" /></figure>
+
+
+
+
+    </article>
+    <span class="print-footer">Forecasting Economic Recessions with LASSO (R Version) - October 16, 2015 - Jason Weinreb</span>
+    <footer>
+  <hr class="slender">
+  <ul class="footer-links">
+    <li><a href="mailto:jweinreb@stanford.edu"><span class="icon-mail"></span></a></li>    
+    
+      <li>
+        <a href="//github.com/jweinreb"><span class="icon-github"></span></a>
+      </li>
+      
+    <li><a href="http://linkedin.com/"><i class="fa fa-linkedin"></i></a></li>
+  </ul>
+<div class="credits">
+<span>&copy; 2017 &nbsp;&nbsp;JASON WEINREB</span></br> <br>
+<span>This site created with the <a href="//github.com/clayh53/tufte-jekyll">Tufte theme for  </a> in <a href="//jekyllrb.com">Jekyll</a>.</span> 
+</div>  
+</footer>
+  </body>
+</html>

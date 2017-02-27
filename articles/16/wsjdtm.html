@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Creating DTMs from Wall Street Journal articles (Python)</title>
+  <meta name="description" content="A longstanding interest of mine is how investors respond to political instability – like news of corruption scandals, gridlock, etc. Since the Wall Street Jo...">
+
+  <!-- Google Fonts loaded here depending on setting in _data/options.yml true loads font, blank does not-->
+  
+    <link href='//fonts.googleapis.com/css?family=Lato:400,400italic' rel='stylesheet' type='text/css'>
+  
+  
+  <!-- Load up MathJax script if needed ... specify in /_data/options.yml file-->
+  
+    <script type="text/javascript" src="//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+  
+
+  <link rel="stylesheet" type="text/css" href="/css/tufte.css">
+  <!-- <link rel="stylesheet" type="text/css" href="/css/print.css" media="print"> -->
+
+  <link rel="canonical" href="/articles/16/wsjdtm">
+
+  <link rel="alternate" type="application/rss+xml" title="jweinreb.github.io" href="/feed.xml" />
+</head>
+
+  <body>
+    <!--- Header and nav template site-wide -->
+<header>
+    <nav class="group">
+	<a href="/"><img class="badge" src="/assets/img/SU_New_BlockStree_2color.png" alt="CH"></a>
+	
+		
+  	
+		
+		    
+		      <a href="/">blog</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/vitae/">Vitae</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/about/">About</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/css/print.css"></a>
+		    
+	    
+  	
+		
+  	
+	</nav>
+</header>
+
+    <article class="group">
+      <h1>Creating DTMs from Wall Street Journal articles (Python)</h1>
+<p class="subtitle">August 31, 2016</p>
+
+<p>A longstanding interest of mine is how investors respond to political instability – like news of corruption scandals, gridlock, etc. Since the Wall Street Journal is a good financial newspaper of record, I’m wondering if the content of WSJ articles can help predict fluctuations in bonds and equities, when combined with monthly economic indicators like industrial production, building permits, etc.</p>
+
+<p>As a first step towards finding out, I wanted to make a script to web-scrape WSJ articles about a given country to create a document term matrix (DTM). Since the WSJ is a dynamic site, we’re going to have to use <code class="highlighter-rouge">selenium</code> here.</p>
+
+<p>Start by importing a whole bunch of <code class="highlighter-rouge">selenium</code> bells and whistles, along with standard ML stuff and some processing tools from <code class="highlighter-rouge">nltk</code>.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="kn">import</span> <span class="nn">os</span><span class="o">,</span> <span class="nn">re</span><span class="o">,</span> <span class="nn">csv</span><span class="o">,</span> <span class="nn">nltk</span><span class="o">,</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="kn">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">selenium</span> <span class="kn">import</span> <span class="n">webdriver</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.common.keys</span> <span class="kn">import</span> <span class="n">Keys</span>
+<span class="kn">from</span> <span class="nn">selenium.common.exceptions</span> <span class="kn">import</span> <span class="n">NoSuchElementException</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.common.by</span> <span class="kn">import</span> <span class="n">By</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.support.ui</span> <span class="kn">import</span> <span class="n">WebDriverWait</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.support</span> <span class="kn">import</span> <span class="n">expected_conditions</span> <span class="k">as</span> <span class="n">EC</span>
+
+<span class="kn">from</span> <span class="nn">urllib.request</span> <span class="kn">import</span> <span class="n">urlopen</span>
+<span class="kn">from</span> <span class="nn">nltk.tokenize</span> <span class="kn">import</span> <span class="n">word_tokenize</span>
+<span class="kn">from</span> <span class="nn">nltk.tag</span> <span class="kn">import</span> <span class="n">pos_tag</span>
+<span class="kn">from</span> <span class="nn">unidecode</span> <span class="kn">import</span> <span class="n">unidecode</span>
+
+<span class="c">#  Import stemmers and dictionaries for stop words</span>
+<span class="n">snowball</span> <span class="o">=</span> <span class="n">nltk</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">SnowballStemmer</span><span class="p">(</span><span class="s">'english'</span><span class="p">)</span>
+<span class="n">lancaster</span> <span class="o">=</span> <span class="n">nltk</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">LancasterStemmer</span><span class="p">()</span>
+<span class="n">stop_words</span> <span class="o">=</span> <span class="n">urlopen</span><span class="p">(</span><span class="s">'http://jmlr.org/papers/volume5/lewis04a/a11-smart-stop-list/english.stop'</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">)</span>
+<span class="n">stop_words</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">stop_words</span><span class="p">)</span></code></pre></figure>
+
+<p>We’ll also borrow a function from <a href="https://github.com/andrewzc/python-wsj">andrewcz</a> to help extract URLs as string from html <code class="highlighter-rouge">&lt;a&gt;</code> tags. (More on this later.) The start of Andrew’s script is useful for getting acquainted with <code class="highlighter-rouge">selenium</code> but we’ll have to go farther if we want to create DTMs for thousands of articles in a robust way.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">getPageUrl</span><span class="p">(</span><span class="n">elementLinks</span><span class="p">):</span>
+    <span class="n">extractLinks</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">element</span> <span class="ow">in</span> <span class="n">elementLinks</span><span class="p">:</span>
+        <span class="n">links</span> <span class="o">=</span> <span class="n">element</span><span class="o">.</span><span class="n">get_attribute</span><span class="p">(</span><span class="s">'href'</span><span class="p">)</span>
+        <span class="n">extractLinks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">links</span><span class="p">)</span>
+    <span class="k">return</span><span class="p">(</span><span class="n">extractLinks</span><span class="p">)</span></code></pre></figure>
+
+<p>To start we’ll bring up the WSJ in Firefox - and I’ll enter my login credentials in the placeholders <code class="highlighter-rouge">your_username</code> and <code class="highlighter-rouge">your_password</code></p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c"># Loading home URL</span>
+<span class="n">browser</span> <span class="o">=</span> <span class="n">webdriver</span><span class="o">.</span><span class="n">Firefox</span><span class="p">()</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s">'http://markets.wsj.com/?mod=Homecle_MDW_MDC'</span><span class="p">)</span>
+
+<span class="c"># Login Credentials</span>
+<span class="n">login</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"Log In"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="n">loginID</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"username"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'your_username'</span><span class="p">)</span>
+<span class="n">loginPass</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"password"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'your_password'</span><span class="p">)</span>
+<span class="n">loginReady</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"login_submit"</span><span class="p">)</span>
+<span class="n">loginReady</span><span class="o">.</span><span class="n">submit</span><span class="p">()</span></code></pre></figure>
+
+<p>Now that we’re logged in, let’s choose a country and start scraping articles about it. In our example, we’ll use Malaysia, which has been the subject of a lot of interesting news over the past few years, including the 1MDB scandal and the tragic disappearance of Malaysian Airlines flight 370. Remember that we’ve just logged in with our credentials, so to make sure we can input search terms without the code crashing, we’ll need to first invoke a wait command. Here, we’re giving the page 10 seconds to load before we try to locate the search box. Once we’ve found it, we can enter the word ‘Malaysia’ into the search box through our Python script.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Basic search: articles containing Malaysia </span>
+<span class="n">WebDriverWait</span><span class="p">(</span><span class="n">browser</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">until</span><span class="p">(</span>
+        <span class="n">EC</span><span class="o">.</span><span class="n">presence_of_element_located</span><span class="p">((</span><span class="n">By</span><span class="o">.</span><span class="n">ID</span><span class="p">,</span> <span class="s">"globalHatSearchInput"</span><span class="p">))</span>
+    <span class="p">)</span>
+
+<span class="n">search_box</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"globalHatSearchInput"</span><span class="p">)</span>
+<span class="n">search_box</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+<span class="n">search_box</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'Malaysia'</span><span class="p">)</span> <span class="c"># Input search keyword</span>
+<span class="n">WebDriverWait</span><span class="p">(</span><span class="n">browser</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="n">search_req</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_css_selector</span><span class="p">(</span><span class="s">'.button-search'</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span></code></pre></figure>
+
+<p>If you’re using Firefox (as opposed to Chrome), there will be an annoying cookies disclaimer banner that interferes with further scraping until you close it. So let’s take care of that:</p>
+
+<!--more-->
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Close cookie policy if needed</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"close"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="k">except</span> <span class="n">NoSuchElementException</span><span class="p">:</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">'Cookie agreement already acknowledged'</span><span class="p">)</span>
+    </code></pre></figure>
+
+<p>Next, let’s narrow our search a bit. In particular, we can focus on a specific date range and also isolate articles whose subject is Malaysia. The code here is finding the ADVANCED SEARCH link, clicking it, inputting dates, putting <code class="highlighter-rouge">Malaysia</code> in the Keywords box, and excluding all manner of videos, blogs etc. These are less traditional forms of media and also more difficult to scrape (although future versions of this project could try to incorporate these, too).</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Expand ADVANCED SEARCH and enter a date range. </span>
+<span class="n">toggleMenu</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"ADVANCED SEARCH"</span><span class="p">)</span>
+<span class="n">toggleMenu</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="n">menuOptions</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">'datePeriod'</span><span class="p">)</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_name</span><span class="p">(</span><span class="s">"sfrom"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">"2014/08/25"</span><span class="p">)</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_name</span><span class="p">(</span><span class="s">"sto"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">"2016/08/25"</span><span class="p">)</span>
+
+<span class="c">## Restrict search to articles whose subject is the country:</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">'metadata'</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">"Malaysia"</span><span class="p">)</span>
+
+<span class="c">## Restrict search to articles only (exclude videos, blogs, etc)</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">execute_script</span><span class="p">(</span><span class="s">"window.scrollTo(0, 500)"</span><span class="p">)</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"WSJ Blogs"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"WSJ Videos"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"WSJ Site Search"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+
+<span class="c">## Scroll up to the search button and click</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">execute_script</span><span class="p">(</span><span class="s">"window.scrollTo(0, 0)"</span><span class="p">)</span>
+<span class="n">searchArchive</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">'keywordSearchBar'</span><span class="p">)</span>
+<span class="n">searchArchive</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"searchButton"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span></code></pre></figure>
+
+<p>If you’re following along, this should give you page 1 of 38 pages of search results – and there should be 758 of them. We’ll want to keep track of these numbers when extracting URLs from the search results, so let’s define them as variables:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">pageCount</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_elements_by_class_name</span><span class="p">(</span><span class="s">"results-count"</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">text</span>
+<span class="n">pageCount</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'of '</span><span class="p">,</span> <span class="s">''</span><span class="p">,</span> <span class="n">pageCount</span><span class="p">))</span>
+<span class="n">pageCount</span> 
+<span class="c"># 38</span>
+
+<span class="n">resultCount</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_elements_by_class_name</span><span class="p">(</span><span class="s">"results-count"</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">text</span>
+<span class="n">resultCount</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">resultCount</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s">"of "</span><span class="p">)[</span><span class="mi">2</span><span class="p">])</span>
+<span class="n">resultCount</span>
+<span class="c"># 758</span></code></pre></figure>
+
+<p>Now we can loop through each page in the search results and extract the article links - see Andrew’s script for the prototype of this:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Extract all article urls</span>
+
+<span class="n">articleLinks</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pageCount</span><span class="p">):</span>
+    <span class="n">elementLinks</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_elements_by_xpath</span><span class="p">(</span><span class="s">'//h3[@class="headline"]/a'</span><span class="p">)</span>
+    <span class="n">links</span> <span class="o">=</span> <span class="n">getPageUrl</span><span class="p">(</span><span class="n">elementLinks</span><span class="p">)</span>
+    <span class="n">articleLinks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">links</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">'done with page '</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="s">' of '</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">pageCount</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">pageCount</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"next-page"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+    
+<span class="n">articleLinks</span> <span class="o">=</span> <span class="p">[</span><span class="n">y</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">articleLinks</span> <span class="k">for</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">x</span><span class="p">]</span></code></pre></figure>
+
+<p>We now have a <code class="highlighter-rouge">articleLinks</code>. which we can consider writing to a .csv file for easier use later on, if we want to redo the analysis.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c"># Write list of urls to a csv file for later use:</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s">"mys_urls.csv"</span><span class="p">,</span> <span class="s">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">csvfile</span><span class="p">:</span>
+    <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">writer</span><span class="p">(</span><span class="n">csvfile</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span> <span class="s">","</span><span class="p">)</span>
+    <span class="n">hdr</span> <span class="o">=</span> <span class="p">[</span><span class="s">'articleLink'</span><span class="p">]</span>
+    <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">articleLinks</span><span class="p">:</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">[</span><span class="n">link</span><span class="p">]</span> 
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+        
+<span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s">"mys_urls.csv"</span><span class="p">)</span>
+<span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>        
+                                         <span class="n">articleLink</span>
+<span class="mi">0</span>  <span class="n">http</span><span class="p">:</span><span class="o">//</span><span class="n">www</span><span class="o">.</span><span class="n">wsj</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">articles</span><span class="o">/</span><span class="n">thailands</span><span class="o">-</span><span class="n">terroris</span><span class="o">...</span>
+<span class="mi">1</span>  <span class="n">http</span><span class="p">:</span><span class="o">//</span><span class="n">www</span><span class="o">.</span><span class="n">wsj</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">articles</span><span class="o">/</span><span class="n">asian</span><span class="o">-</span><span class="n">shares</span><span class="o">-</span><span class="n">mixed</span><span class="o">...</span>
+<span class="mi">2</span>  <span class="n">http</span><span class="p">:</span><span class="o">//</span><span class="n">www</span><span class="o">.</span><span class="n">wsj</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">articles</span><span class="o">/</span><span class="n">photos</span><span class="o">-</span><span class="n">mother</span><span class="o">-</span><span class="n">daug</span><span class="o">...</span>
+<span class="mi">3</span>  <span class="n">http</span><span class="p">:</span><span class="o">//</span><span class="n">www</span><span class="o">.</span><span class="n">wsj</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">articles</span><span class="o">/</span><span class="n">asian</span><span class="o">-</span><span class="n">shares</span><span class="o">-</span><span class="n">mixed</span><span class="o">...</span>
+<span class="mi">4</span>  <span class="n">http</span><span class="p">:</span><span class="o">//</span><span class="n">www</span><span class="o">.</span><span class="n">wsj</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">articles</span><span class="o">/</span><span class="n">key</span><span class="o">-</span><span class="n">figure</span><span class="o">-</span><span class="ow">in</span><span class="o">-</span><span class="mi">1</span><span class="n">mdb</span><span class="o">...</span>        </code></pre></figure>
+
+<p>Now we’re ready to loop through each of these URLs to extract the text of each article. Start by creating three placeholders. The first is a dictionary <code class="highlighter-rouge">Articles</code> where the key will be the headline of each Article as extracted from the URL. This Articles dictionary will be <em>nested</em> so that each headline then has its own inner dictionary with keys <code class="highlighter-rouge">time stamp</code>, <code class="highlighter-rouge">link</code>, and <code class="highlighter-rouge">unigrams</code>, which is yet another dictionary that will extract the article’s tokens. We will also make an overarching <code class="highlighter-rouge">Unigrams</code> dictionary to store counts of every (stemmed) unigram we encounter in our scraping. Finally, we’ll have a counter <code class="highlighter-rouge">article_count</code> to keep track of how many results we’ve scraped so far.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Create placeholder dictionaries for Articles and Unigrams (in all articles):</span>
+<span class="n">Articles</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="n">Unigrams</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="n">article_count</span> <span class="o">=</span> <span class="mi">0</span></code></pre></figure>
+
+<p>We can loop through articles as follows (here’s code for just the first 99). I’ll describe what it does down below.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"> 
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">articleLink</span><span class="p">[:</span><span class="mi">100</span><span class="p">]:</span>
+    
+    <span class="n">browser</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+    
+    <span class="c"># Get headline if it exists (otherwise continue) </span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">headline</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"wsj-article-headline"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span>
+    <span class="k">except</span> <span class="n">NoSuchElementException</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="s">' : no headline'</span><span class="p">)</span>
+        <span class="k">continue</span>
+    
+    <span class="c"># Enter article headline into dictionary </span>
+    <span class="n">Articles</span><span class="p">[</span><span class="n">headline</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    
+    <span class="c"># Get timestamp if it exists (otherwise continue)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"timestamp"</span><span class="p">)</span><span class="o">.</span><span class="n">text</span>
+    <span class="k">except</span> <span class="n">NoSuchElementException</span><span class="p">:</span>
+        <span class="k">print</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="s">' : no time stamp'</span><span class="p">)</span>
+        <span class="k">continue</span> 
+    
+    <span class="c"># Clean time stamp if it exists </span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'Updated '</span><span class="p">,</span> <span class="s">''</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">)</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r' ET'</span><span class="p">,</span> <span class="s">''</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">)</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'p.m.'</span><span class="p">,</span> <span class="s">'PM'</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">)</span>
+    <span class="n">timestamp</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'a.m.'</span><span class="p">,</span> <span class="s">'AM'</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="s">'Sept.'</span> <span class="ow">in</span> <span class="n">timestamp</span><span class="p">:</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'Sept.'</span><span class="p">,</span> <span class="s">'Sep.'</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="s">"COMMENTS"</span> <span class="ow">in</span> <span class="n">timestamp</span><span class="p">:</span>
+        <span class="n">timestamp</span> <span class="o">=</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="s">'AM'</span> <span class="ow">in</span> <span class="n">timestamp</span> <span class="ow">or</span> <span class="s">'PM'</span> <span class="ow">in</span> <span class="n">timestamp</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">'</span><span class="si">%</span><span class="s">b. </span><span class="si">%</span><span class="s">d, </span><span class="si">%</span><span class="s">Y </span><span class="si">%</span><span class="s">I:</span><span class="si">%</span><span class="s">M </span><span class="si">%</span><span class="s">p'</span><span class="p">)</span>
+        <span class="k">except</span> <span class="nb">ValueError</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">'</span><span class="si">%</span><span class="s">B </span><span class="si">%</span><span class="s">d, </span><span class="si">%</span><span class="s">Y </span><span class="si">%</span><span class="s">I:</span><span class="si">%</span><span class="s">M </span><span class="si">%</span><span class="s">p'</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">'</span><span class="si">%</span><span class="s">B </span><span class="si">%</span><span class="s">d, </span><span class="si">%</span><span class="s">Y'</span><span class="p">)</span>
+        <span class="k">except</span> <span class="nb">ValueError</span><span class="p">:</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">'</span><span class="si">%</span><span class="s">b. </span><span class="si">%</span><span class="s">d, </span><span class="si">%</span><span class="s">Y'</span><span class="p">)</span>
+    
+    <span class="c"># Put timestamp and link into Article dictionary </span>
+    <span class="n">Articles</span><span class="p">[</span><span class="n">headline</span><span class="p">][</span><span class="s">"date"</span><span class="p">]</span> <span class="o">=</span> <span class="n">timestamp</span>
+    <span class="n">Articles</span><span class="p">[</span><span class="n">headline</span><span class="p">][</span><span class="s">"link"</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+        
+    <span class="c"># Extract article text</span>
+    <span class="n">paragraphs</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_elements_by_xpath</span><span class="p">(</span><span class="s">'//*[@id="wsj-article-wrap"]/p'</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">paragraphs</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="s">'@wsj.com'</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">paragraphs</span><span class="p">[</span><span class="n">t</span><span class="p">]</span><span class="o">.</span><span class="n">text</span> <span class="ow">and</span> 
+            <span class="s">'contributed to this article'</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">paragraphs</span><span class="p">[</span><span class="n">t</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="p">):</span>
+            <span class="n">text</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">paragraphs</span><span class="p">[</span><span class="n">t</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="s">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>    
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r'</span><span class="err">\</span><span class="s">n'</span><span class="p">,</span> <span class="s">' '</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">"</span><span class="err">\</span><span class="s">W"</span><span class="p">,</span> <span class="s">" "</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="c"># Tokenize, stem and remove standalone numbers and (some) proper nouns </span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">nltk</span><span class="o">.</span><span class="n">word_tokenize</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="n">snowball</span><span class="o">.</span><span class="n">stem</span><span class="p">(</span><span class="n">w</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">]</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">tokens</span> <span class="k">if</span> <span class="n">x</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stop_words</span><span class="p">]</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">tokens</span> <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()</span> <span class="ow">or</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s">'-'</span> <span class="ow">and</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">isdigit</span><span class="p">())]</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="n">word</span> <span class="k">for</span> <span class="n">word</span><span class="p">,</span><span class="n">pos</span> <span class="ow">in</span> <span class="n">pos_tag</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span> <span class="k">if</span> <span class="n">pos</span> <span class="o">!=</span> <span class="s">"NNP"</span><span class="p">]</span>
+    
+    <span class="c"># Add tokens to inner unigrams dictionary</span>
+    <span class="n">Articles</span><span class="p">[</span><span class="n">headline</span><span class="p">][</span><span class="s">"unigrams"</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">:</span>
+        <span class="n">count</span> <span class="o">=</span> <span class="n">tokens</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">j</span><span class="p">)</span>
+        <span class="n">Articles</span><span class="p">[</span><span class="n">headline</span><span class="p">][</span><span class="s">"unigrams"</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">count</span>
+        <span class="k">if</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">Unigrams</span><span class="p">:</span>
+            <span class="n">Unigrams</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+=</span> <span class="n">count</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">Unigrams</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">count</span>
+            
+    <span class="n">article_count</span> <span class="o">+=</span> <span class="mi">1</span>   </code></pre></figure>
+
+<p>The code first opens the url. We extract the headline if it exists, and enter it into the <code class="highlighter-rouge">Articles</code> dictionary. Some articles don’t have their headline within the “wsj-article-headline” class, and so we put a continue to just keep moving forward though other links. Next we do a similar trick for finding the time stamp, again employing a continue error handling just in case. We have to do a fair amount of work to clean the timestamp format into something consistent across articles, and put it in the <code class="highlighter-rouge">Articles</code> dictionary.</p>
+
+<p>After we extract basic info about the article, we’ll need to get its tokens and put them in two places: first, inside the <code class="highlighter-rouge">Articles' dictionary entry for the given article; second, each word will have to go into the outer </code>Unigrams’ dictionary. To extract paragraphs of article text, we isolate the <code class="highlighter-rouge">&lt;p&gt;</code> tags, remove ending text about contributions and author contacts, and do some more tokenizing / processing. We try to remove some of the proper nouns with the NNP tag, but this doesn’t work very well… definitely a point to improve in future iterations.</p>
+
+<p>Whew. Now we have all of our information in python and it’s time to translate it into a DTM .csv file:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">hdr</span> <span class="o">=</span> <span class="p">[</span><span class="s">'headline'</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="s">'date'</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">unidecode</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">Unigrams</span><span class="o">.</span><span class="n">keys</span><span class="p">())]</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s">"unigrams_mys.csv"</span><span class="p">,</span> <span class="s">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">csvfile</span><span class="p">:</span>
+    <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">writer</span><span class="p">(</span><span class="n">csvfile</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span> <span class="s">","</span><span class="p">)</span>
+    <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span>
+    <span class="n">titles</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">Articles</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">titles</span><span class="p">)):</span>
+        <span class="n">toWrite</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">toWrite</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unidecode</span><span class="p">(</span><span class="n">titles</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span>
+        <span class="n">toWrite</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Articles</span><span class="p">[</span><span class="n">titles</span><span class="p">[</span><span class="n">i</span><span class="p">]][</span><span class="s">"date"</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">Unigrams</span><span class="o">.</span><span class="n">keys</span><span class="p">()):</span>
+            <span class="k">if</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">Articles</span><span class="p">[</span><span class="n">titles</span><span class="p">[</span><span class="n">i</span><span class="p">]][</span><span class="s">'unigrams'</span><span class="p">]:</span>
+               <span class="n">toWrite</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">unidecode</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">Articles</span><span class="p">[</span><span class="n">titles</span><span class="p">[</span><span class="n">i</span><span class="p">]][</span><span class="s">"unigrams"</span><span class="p">][</span><span class="n">j</span><span class="p">])))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">toWrite</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">(</span><span class="n">toWrite</span><span class="p">)</span></code></pre></figure>
+
+<p>That’s it. You can head over to my <a href="https://github.com/jweinreb/python-wsj">python-wsj repos</a> for the code file and csv outputs from the example here.</p>
+
+
+
+
+    </article>
+    <span class="print-footer">Creating DTMs from Wall Street Journal articles (Python) - August 31, 2016 - Jason Weinreb</span>
+    <footer>
+  <hr class="slender">
+  <ul class="footer-links">
+    <li><a href="mailto:jweinreb@stanford.edu"><span class="icon-mail"></span></a></li>    
+    
+      <li>
+        <a href="//github.com/jweinreb"><span class="icon-github"></span></a>
+      </li>
+      
+    <li><a href="http://linkedin.com/"><i class="fa fa-linkedin"></i></a></li>
+  </ul>
+<div class="credits">
+<span>&copy; 2017 &nbsp;&nbsp;JASON WEINREB</span></br> <br>
+<span>This site created with the <a href="//github.com/clayh53/tufte-jekyll">Tufte theme for  </a> in <a href="//jekyllrb.com">Jekyll</a>.</span> 
+</div>  
+</footer>
+  </body>
+</html>

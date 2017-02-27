@@ -1,17 +1,195 @@
----
-layout: full-width
-title: blog
-# Note that this index page uses a full-width layout!
----
+<!DOCTYPE html>
+<html>
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <h1 class="content-listing-header sans">Articles</h1>
+  <title>blog</title>
+  <meta name="description" content="my blog">
+
+  <!-- Google Fonts loaded here depending on setting in _data/options.yml true loads font, blank does not-->
+  
+    <link href='//fonts.googleapis.com/css?family=Lato:400,400italic' rel='stylesheet' type='text/css'>
+  
+  
+  <!-- Load up MathJax script if needed ... specify in /_data/options.yml file-->
+  
+    <script type="text/javascript" src="//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+  
+
+  <link rel="stylesheet" type="text/css" href="/css/tufte.css">
+  <!-- <link rel="stylesheet" type="text/css" href="/css/print.css" media="print"> -->
+
+  <link rel="canonical" href="/">
+
+  <link rel="alternate" type="application/rss+xml" title="jweinreb.github.io" href="/feed.xml" />
+</head>
+
+  <body class="full-width">
+    <!--- Header and nav template site-wide -->
+<header>
+    <nav class="group">
+	<a href="/"><img class="badge" src="/assets/img/SU_New_BlockStree_2color.png" alt="CH"></a>
+	
+		
+  	
+		
+		    
+		      <a class="active" href="/" class="active">blog</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/vitae/">Vitae</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/about/">About</a>
+		    
+	    
+  	
+		
+		    
+		      <a href="/css/print.css"></a>
+		    
+	    
+  	
+		
+  	
+	</nav>
+</header>
+
+    <article>
+        <h1 class="content-listing-header sans">Articles</h1>
   <ul class="content-listing ">
-    {% for post in site.posts %}      
+          
         <li class="listing">
           <hr class="slender">
-          <a href="{{ post.url | prepend: site.baseurl }}"><h3 class="contrast">{{ post.title }}</h3></a>
-          <br><span class="smaller">{{ post.date | date: "%B %-d, %Y" }}</span>  <br/>
-          <div>{{ post.excerpt }}</div> 
+          <a href="/articles/16/wsjdtm"><h3 class="contrast">Creating DTMs from Wall Street Journal articles (Python)</h3></a>
+          <br><span class="smaller">August 31, 2016</span>  <br/>
+          <div><p>A longstanding interest of mine is how investors respond to political instability – like news of corruption scandals, gridlock, etc. Since the Wall Street Journal is a good financial newspaper of record, I’m wondering if the content of WSJ articles can help predict fluctuations in bonds and equities, when combined with monthly economic indicators like industrial production, building permits, etc.</p>
+
+<p>As a first step towards finding out, I wanted to make a script to web-scrape WSJ articles about a given country to create a document term matrix (DTM). Since the WSJ is a dynamic site, we’re going to have to use <code class="highlighter-rouge">selenium</code> here.</p>
+
+<p>Start by importing a whole bunch of <code class="highlighter-rouge">selenium</code> bells and whistles, along with standard ML stuff and some processing tools from <code class="highlighter-rouge">nltk</code>.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="kn">import</span> <span class="nn">os</span><span class="o">,</span> <span class="nn">re</span><span class="o">,</span> <span class="nn">csv</span><span class="o">,</span> <span class="nn">nltk</span><span class="o">,</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="kn">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">selenium</span> <span class="kn">import</span> <span class="n">webdriver</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.common.keys</span> <span class="kn">import</span> <span class="n">Keys</span>
+<span class="kn">from</span> <span class="nn">selenium.common.exceptions</span> <span class="kn">import</span> <span class="n">NoSuchElementException</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.common.by</span> <span class="kn">import</span> <span class="n">By</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.support.ui</span> <span class="kn">import</span> <span class="n">WebDriverWait</span>
+<span class="kn">from</span> <span class="nn">selenium.webdriver.support</span> <span class="kn">import</span> <span class="n">expected_conditions</span> <span class="k">as</span> <span class="n">EC</span>
+
+<span class="kn">from</span> <span class="nn">urllib.request</span> <span class="kn">import</span> <span class="n">urlopen</span>
+<span class="kn">from</span> <span class="nn">nltk.tokenize</span> <span class="kn">import</span> <span class="n">word_tokenize</span>
+<span class="kn">from</span> <span class="nn">nltk.tag</span> <span class="kn">import</span> <span class="n">pos_tag</span>
+<span class="kn">from</span> <span class="nn">unidecode</span> <span class="kn">import</span> <span class="n">unidecode</span>
+
+<span class="c">#  Import stemmers and dictionaries for stop words</span>
+<span class="n">snowball</span> <span class="o">=</span> <span class="n">nltk</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">SnowballStemmer</span><span class="p">(</span><span class="s">'english'</span><span class="p">)</span>
+<span class="n">lancaster</span> <span class="o">=</span> <span class="n">nltk</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">LancasterStemmer</span><span class="p">()</span>
+<span class="n">stop_words</span> <span class="o">=</span> <span class="n">urlopen</span><span class="p">(</span><span class="s">'http://jmlr.org/papers/volume5/lewis04a/a11-smart-stop-list/english.stop'</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">)</span>
+<span class="n">stop_words</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">stop_words</span><span class="p">)</span></code></pre></figure>
+
+<p>We’ll also borrow a function from <a href="https://github.com/andrewzc/python-wsj">andrewcz</a> to help extract URLs as string from html <code class="highlighter-rouge">&lt;a&gt;</code> tags. (More on this later.) The start of Andrew’s script is useful for getting acquainted with <code class="highlighter-rouge">selenium</code> but we’ll have to go farther if we want to create DTMs for thousands of articles in a robust way.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">getPageUrl</span><span class="p">(</span><span class="n">elementLinks</span><span class="p">):</span>
+    <span class="n">extractLinks</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">element</span> <span class="ow">in</span> <span class="n">elementLinks</span><span class="p">:</span>
+        <span class="n">links</span> <span class="o">=</span> <span class="n">element</span><span class="o">.</span><span class="n">get_attribute</span><span class="p">(</span><span class="s">'href'</span><span class="p">)</span>
+        <span class="n">extractLinks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">links</span><span class="p">)</span>
+    <span class="k">return</span><span class="p">(</span><span class="n">extractLinks</span><span class="p">)</span></code></pre></figure>
+
+<p>To start we’ll bring up the WSJ in Firefox - and I’ll enter my login credentials in the placeholders <code class="highlighter-rouge">your_username</code> and <code class="highlighter-rouge">your_password</code></p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c"># Loading home URL</span>
+<span class="n">browser</span> <span class="o">=</span> <span class="n">webdriver</span><span class="o">.</span><span class="n">Firefox</span><span class="p">()</span>
+<span class="n">browser</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s">'http://markets.wsj.com/?mod=Homecle_MDW_MDC'</span><span class="p">)</span>
+
+<span class="c"># Login Credentials</span>
+<span class="n">login</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_link_text</span><span class="p">(</span><span class="s">"Log In"</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
+<span class="n">loginID</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"username"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'your_username'</span><span class="p">)</span>
+<span class="n">loginPass</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"password"</span><span class="p">)</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'your_password'</span><span class="p">)</span>
+<span class="n">loginReady</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_class_name</span><span class="p">(</span><span class="s">"login_submit"</span><span class="p">)</span>
+<span class="n">loginReady</span><span class="o">.</span><span class="n">submit</span><span class="p">()</span></code></pre></figure>
+
+<p>Now that we’re logged in, let’s choose a country and start scraping articles about it. In our example, we’ll use Malaysia, which has been the subject of a lot of interesting news over the past few years, including the 1MDB scandal and the tragic disappearance of Malaysian Airlines flight 370. Remember that we’ve just logged in with our credentials, so to make sure we can input search terms without the code crashing, we’ll need to first invoke a wait command. Here, we’re giving the page 10 seconds to load before we try to locate the search box. Once we’ve found it, we can enter the word ‘Malaysia’ into the search box through our Python script.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c">## Basic search: articles containing Malaysia </span>
+<span class="n">WebDriverWait</span><span class="p">(</span><span class="n">browser</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">until</span><span class="p">(</span>
+        <span class="n">EC</span><span class="o">.</span><span class="n">presence_of_element_located</span><span class="p">((</span><span class="n">By</span><span class="o">.</span><span class="n">ID</span><span class="p">,</span> <span class="s">"globalHatSearchInput"</span><span class="p">))</span>
+    <span class="p">)</span>
+
+<span class="n">search_box</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_id</span><span class="p">(</span><span class="s">"globalHatSearchInput"</span><span class="p">)</span>
+<span class="n">search_box</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+<span class="n">search_box</span><span class="o">.</span><span class="n">send_keys</span><span class="p">(</span><span class="s">'Malaysia'</span><span class="p">)</span> <span class="c"># Input search keyword</span>
+<span class="n">WebDriverWait</span><span class="p">(</span><span class="n">browser</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="n">search_req</span> <span class="o">=</span> <span class="n">browser</span><span class="o">.</span><span class="n">find_element_by_css_selector</span><span class="p">(</span><span class="s">'.button-search'</span><span class="p">)</span><span class="o">.</span><span class="n">click</span><span class="p">()</span></code></pre></figure>
+
+<p>If you’re using Firefox (as opposed to Chrome), there will be an annoying cookies disclaimer banner that interferes with further scraping until you close it. So let’s take care of that:</p>
+
+</div> 
         </li>
-    {% endfor %}
+          
+        <li class="listing">
+          <hr class="slender">
+          <a href="/articles/16/rnds"><h3 class="contrast">Computing Risk Neutral Distributions from Option Prices in R</h3></a>
+          <br><span class="smaller">May 15, 2016</span>  <br/>
+          <div><p>This post gives some R code to replicate a <a href="https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr677.pdf">2014 paper</a> by Allan Malz, essentially a cookbook for computing risk-neutral distributions from option prices. These distributions give us a sense of investors’ expected beliefs about future asset prices (assuming investors are close enough to being risk neutral). The below example relies on <a href="/assets/OptPanel.csv">a panel of option prices on USDBRL</a>.</p>
+
+</div> 
+        </li>
+          
+        <li class="listing">
+          <hr class="slender">
+          <a href="/articles/15/recession"><h3 class="contrast">Forecasting Economic Recessions with LASSO (R Version)</h3></a>
+          <br><span class="smaller">October 16, 2015</span>  <br/>
+          <div><p>I developed a machine learning model that predicts recessions out-of-sample with over 95% accuracy.</p>
+
+<p>The model uses LASSO estimation and relies on a panel of <a href="/assets/recTransformed.csv">transformed economic data</a>. Inputs here are proprietary blends of standard leading economic indicators based on some of my prior consulting work. Variables in the data set fall into nine categories capturing things like the housing market, credit spreads, the yield curve, etc. The outcome variable is a binary recession indicator, coded ex-post by a recession dating committee within the NBER.</p>
+
+<p>First, load the required libraries and data</p>
+
+<figure class="highlight"><pre><code class="language-r" data-lang="r"><span class="n">library</span><span class="p">(</span><span class="n">quantmod</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">TTR</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">zoo</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">lubridate</span><span class="p">)</span><span class="w">
+</span><span class="n">library</span><span class="p">(</span><span class="n">glmnet</span><span class="p">)</span><span class="w">
+
+</span><span class="n">p</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">read.csv</span><span class="p">(</span><span class="s2">"recTransformed.csv"</span><span class="p">,</span><span class="w"> </span><span class="n">header</span><span class="o">=</span><span class="nb">T</span><span class="p">)</span><span class="w">
+</span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">as.Date</span><span class="p">(</span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="p">,</span><span class="w"> </span><span class="n">format</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%m/%d/%y"</span><span class="p">)</span><span class="w">
+</span><span class="n">p</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">zoo</span><span class="p">(</span><span class="n">p</span><span class="p">[,</span><span class="m">-1</span><span class="p">],</span><span class="w"> </span><span class="n">order.by</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p</span><span class="o">$</span><span class="n">X</span><span class="p">)</span><span class="w">
+</span><span class="nf">names</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="n">tolower</span><span class="p">(</span><span class="n">gsub</span><span class="p">(</span><span class="s2">".Index"</span><span class="p">,</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w"> </span><span class="nf">names</span><span class="p">(</span><span class="n">p</span><span class="p">)))</span></code></pre></figure>
+
+</div> 
+        </li>
+    
   </ul>
+    </article>
+    <span class="print-footer">blog - Jason Weinreb</span>
+    <footer>
+  <hr class="slender">
+  <ul class="footer-links">
+    <li><a href="mailto:jweinreb@stanford.edu"><span class="icon-mail"></span></a></li>    
+    
+      <li>
+        <a href="//github.com/jweinreb"><span class="icon-github"></span></a>
+      </li>
+      
+    <li><a href="http://linkedin.com/"><i class="fa fa-linkedin"></i></a></li>
+  </ul>
+<div class="credits">
+<span>&copy; 2017 &nbsp;&nbsp;JASON WEINREB</span></br> <br>
+<span>This site created with the <a href="//github.com/clayh53/tufte-jekyll">Tufte theme for  </a> in <a href="//jekyllrb.com">Jekyll</a>.</span> 
+</div>  
+</footer>
+  </body>
+</html>
